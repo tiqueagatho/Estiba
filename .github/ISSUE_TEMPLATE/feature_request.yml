@@ -1,0 +1,33 @@
+name: Idea / mejora
+description: Propón una mejora (p. ej. de la Fase 4)
+title: "[idea] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: ¿Qué propones?
+      description: Describe la mejora y el problema que resuelve.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - códec (LZ / entropía / formato)
+        - driver (estiba.ko, bios, contexto atómico)
+        - dedup / allocator de tamaño variable
+        - writeback / aging hot-cold
+        - sandbox / CI / build
+        - documentación
+        - otro
+    validations:
+      required: true
+  - type: textarea
+    id: notas
+    attributes:
+      label: Notas / referencias
+      description: Papers, código relacionado (zram, zsmalloc, zstd…) o ideas de diseño.
+    validations:
+      required: false

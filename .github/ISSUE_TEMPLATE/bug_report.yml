@@ -1,0 +1,40 @@
+name: Bug
+description: Reporta un fallo (códec, driver estiba.ko o sandbox)
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ¿Es un fallo de **seguridad** (corrupción, escalada, DoS)?
+        Repórtalo en privado desde la pestaña **Security**, no aquí.
+  - type: textarea
+    id: que
+    attributes:
+      label: ¿Qué ocurre?
+      description: Describe el fallo y qué esperabas que pasara.
+    validations:
+      required: true
+  - type: textarea
+    id: reproducir
+    attributes:
+      label: Cómo reproducirlo
+      description: Comandos exactos (p. ej. `cd module/estiba && make parity`).
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: entorno
+    attributes:
+      label: Entorno
+      description: Salida de `uname -r`, si usas el sandbox/VM o local, versión de Rust.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`dmesg`, salida de `cargo test`, log de la VM (`infra/sandbox/.vm-test.log`)."
+      render: shell
+    validations:
+      required: false

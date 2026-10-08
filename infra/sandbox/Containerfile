@@ -1,4 +1,4 @@
-# tRAM — sandbox de Fase 0
+# estiba — sandbox de Fase 0
 #
 # Contenedor rootless que contiene TODO el toolchain para reconstruir el
 # kernel custom con CONFIG_RUST=y y probarlo en una VM QEMU/KVM (virtme-ng)

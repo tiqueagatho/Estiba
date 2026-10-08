@@ -11,8 +11,6 @@
 //!
 //! Funciones puras y deterministas; `#![forbid(unsafe_code)]`.
 
-use alloc::vec::Vec;
-
 /// Máxima longitud de código soportada en el formato v1.
 pub const C_MAX_BITS: usize = 12;
 
@@ -119,12 +117,15 @@ pub fn code_tables(counts: &[u32; 256], k: usize, order: &[u8; 256]) -> Tables {
     for l in 2..=max_len as usize {
         next[l] = (next[l - 1] + bl_count[l - 1]) << 1;
     }
-    let mut syms: Vec<(u8, u8)> = (0..k as u8).map(|s| (tbl.lengths[s as usize], s)).collect();
-    syms.sort_by_key(|&(l, s)| (l, s));
-    for &(len, s) in syms.iter() {
-        let l = len as usize;
-        tbl.codes[s as usize] = next[l];
-        next[l] += 1;
+    // Orden canónico (longitud asc, símbolo asc): equivalente al sort estable
+    // por (len, sym) de DEFLATE, sin depender de `slice::sort`.
+    for l in 1..=max_len as usize {
+        for s in 0..k {
+            if tbl.lengths[s] as usize == l {
+                tbl.codes[s] = next[l];
+                next[l] += 1;
+            }
+        }
     }
     tbl
 }

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-//! tRAM codec — núcleo de compresión para slots de swap/RAM.
+//! estiba codec — núcleo de compresión para slots de swap/RAM.
 //!
-//! Pipeline (v1, determinista, sin alloc en el caliente):
+//! Pipeline (v2, determinista, sin alloc en el caliente):
 //!   1. Capa LZ estilo LZ4: matches (offset+longitud) + literales
 //!      (`lz::tokenize`).
 //!   2. Traducción de valores: el alfabeto de *valores* de los literales se
 //!      ordena por (count desc, valor asc); cada literal se mapea a un
-//!      símbolo 0..K-1. Cabecera: K (1 B) + alfabeto (K B).
+//!      símbolo 0..K-1. Cabecera: K 0-based (1 B) + alfabeto (K B).
 //!      Caso óptimo para páginas borradas/sólo-ceros: K==1 -> 0 bits payload.
 //!   3. Huffman canónico sobre el alfabeto de símbolos (estático; longitudes
 //!      ≤ C_MAX), que da ≈ la entropía del dato real (LZ4/LZO no hacen
@@ -16,10 +16,10 @@
 //! Garantías: determinismo bit a bit, CRC16 (reflect 0x8005) por slot,
 //! búferes acotados (`compress_bound`), `no_std` + `#![forbid(unsafe_code)]`.
 //!
-//! El paso "ternario" (planos de trits / packing AVX2) es una vía *futura*
-//! sobre los planos de signo; v1 codifica entropía de forma correcta sobre el
-//! alfabeto de valores, que es la cota que gana el gate de ratio frente a
-//! LZ4/LZO (que no hacen entropía).
+//! Alcance: la ventaja de estiba no es el algoritmo (LZ + entropía es un campo
+//! maduro, tipo DEFLATE) sino la combinación **memory-safe + determinista +
+//! verificable**: mismo bitstream en userspace y en el kernel, CRC por slot y
+//! paridad bit-exacta. No se persigue superar a zstd en ratio.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -35,15 +35,15 @@ mod values;
 pub use lz::HASH_TAB_LEN;
 
 /// Formato del slot (10 B):
-///   [0..2)  magic 0x54 0x52 ("TR")
-///   [2]     version (1)
+///   [0..2)  magic 0x45 0x53 ("ES", estiba)
+///   [2]     version (3 = magic "ES"; v2 introdujo K 0-based en la entropía)
 ///   [3]     flags (bit0 = store_raw)
 ///   [4..6)  input_len (u16 LE)
 ///   [6..8)  output_len (u16 LE)
 ///   [8..10) crc16 reflect 0x8005 sobre el payload
 ///   [10..)  payload: RAW (flag) o tokens-lz + sección de entropía.
-pub(crate) const MAGIC: [u8; 2] = [0x54, 0x52];
-pub(crate) const VERSION: u8 = 1;
+pub(crate) const MAGIC: [u8; 2] = [0x45, 0x53];
+pub(crate) const VERSION: u8 = 3;
 pub(crate) const FLAG_RAW: u8 = 1 << 0;
 pub(crate) const HEADER_LEN: usize = 10;
 
@@ -126,13 +126,15 @@ fn build_entropy(src: &[u8], tok: &[u8], dst: &mut [u8]) -> Result<usize, CodecE
         return Err(CodecError::Buffer); // histograma patológico -> RAW
     }
 
-    // Cabecera de entropía: K | alfabeto | longitudes.
+    // Cabecera de entropía: K | alfabeto | longitudes. K se guarda como
+    // `K - 1` (0-based): K=256 cabe en un byte (el valor 0 del original
+    // desbordaba con `as u8` — bug v1, corregido en v2).
     let hh = 1 + k + k;
     let bits_cap = ((lit_total * huff::C_MAX_BITS + 7) / 8) + 2;
     if dst.len() < hh + bits_cap {
         return Err(CodecError::Buffer);
     }
-    dst[0] = k as u8;
+    dst[0] = (k - 1) as u8;
     dst[1..1 + k].copy_from_slice(&alphabet[..k]);
     dst[1 + k..1 + 2 * k].copy_from_slice(&tbl.lengths[..k]);
 
@@ -193,8 +195,8 @@ fn restore_payload(payload: &[u8], dst: &mut [u8], scratch: &mut [u8], expected:
     let tok = &payload[..te];
     let ent = &payload[te..];
 
-    // 2) Cabecera de entropía.
-    let k = ent[0] as usize;
+    // 2) Cabecera de entropía. K se almacena 0-based (v2): K ∈ 1..=256.
+    let k = ent[0] as usize + 1;
     if k == 0 || k > 256 || ent.len() < 1 + 2 * k {
         return Err(CodecError::Slot);
     }
@@ -290,7 +292,7 @@ pub fn crc16(data: &[u8]) -> u16 {
     crc
 }
 
-// -- wrappers con alloc (userspace: tram-bench / tram-ctl / tests) ----------
+// -- wrappers con alloc (userspace: estiba-bench / estiba-ctl / tests) ----------
 #[cfg(feature = "alloc")]
 pub fn compress(src: &[u8]) -> Result<alloc::vec::Vec<u8>, CodecError> {
     let bound = compress_bound(src.len());
@@ -314,12 +316,6 @@ pub fn decompress(slot: &[u8]) -> Result<alloc::vec::Vec<u8>, CodecError> {
     dst.truncate(n);
     Ok(dst)
 }
-
-/// Bits por trit en el límite de Shannon (log2 3 ≈ 1.585).
-pub const BITS_PER_TRIT: f64 = 1.584_962_500_721_156;
-/// Trits necesarios para representar un byte (3^6 = 729 ≥ 256); constante de
-/// nomenclatura para la fase AVX2 (planos de signo), no del payload v1.
-pub const TRITS_PER_BYTE: usize = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodecError {
@@ -359,6 +355,18 @@ mod tests {
     #[test]
     fn roundtrip_empty() {
         roundtrip(&[]);
+    }
+
+    #[test]
+    fn roundtrip_full_alphabet_k256() {
+        // Alfabeto completo: las 256 frecuencias > 0 -> K = 256. En v1 el
+        // byte de cabecera `K as u8` desbordaba a 0 y el slot era ilegible
+        // (Err(Slot)); v2 guarda K 0-based y debe cerrar el roundtrip.
+        let data: Vec<u8> = (0..1024).map(|i| (i % 256) as u8).collect();
+        roundtrip(&data);
+        // También con cada byte valor repetido (histograma uniforme k=256).
+        let data: Vec<u8> = (0..4).flat_map(|_| 0u8..=255).collect();
+        roundtrip(&data);
     }
 
     #[test]

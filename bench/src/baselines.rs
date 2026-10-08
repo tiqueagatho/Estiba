@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-//! Implementaciones del trait `Codec` usadas por tram-bench: el codec ternario
-//! (`Tram`) y los baselines LZ4 / LZO1X cargados en runtime por `dlopen`
+//! Implementaciones del trait `Codec` usadas por estiba-bench: el codec propio
+//! (`Estiba`) y los baselines LZ4 / LZO1X cargados en runtime por `dlopen`
 //! contra `liblz4.so.1` / `liblzo2.so.2` del sistema (sin dependencias de
 //! build ni headers: los prototipos se declaran aquí mismo).
 
@@ -26,21 +26,21 @@ unsafe fn load<T>(handle: *mut c_void, name: &str) -> Option<T> {
     }
 }
 
-/// El codec de tRAM (lazy bindings del crate; los buffers se reutilizan para
+/// El codec de estiba (lazy bindings del crate; los buffers se reutilizan para
 /// no contar el alloc como parte del throughput).
-pub struct Tram {
+pub struct Estiba {
     dst: Vec<u8>,
     scratch: Vec<u8>,
     ht: Vec<u32>,
 }
 
-impl Tram {
+impl Estiba {
     pub fn new() -> Self {
-        let bound = tram_codec::compress_bound(tram_codec::MAX_INPUT_LEN);
-        Tram {
+        let bound = estiba_codec::compress_bound(estiba_codec::MAX_INPUT_LEN);
+        Estiba {
             dst: vec![0u8; bound],
             scratch: vec![0u8; bound],
-            ht: vec![0u32; tram_codec::HASH_TAB_LEN],
+            ht: vec![0u32; estiba_codec::HASH_TAB_LEN],
         }
     }
 }
@@ -52,19 +52,19 @@ pub trait Codec {
     fn decompress_into(&mut self, src: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<(), ()>;
 }
 
-impl Codec for Tram {
+impl Codec for Estiba {
     fn name(&self) -> &str {
-        "tram (LZ+Huf)"
+        "estiba (LZ+Huf)"
     }
     fn compress_into(&mut self, src: &[u8], out: &mut Vec<u8>) -> Result<(), ()> {
-        let n = tram_codec::compress_into(src, &mut self.dst, &mut self.scratch, &mut self.ht)
+        let n = estiba_codec::compress_into(src, &mut self.dst, &mut self.scratch, &mut self.ht)
             .map_err(|_| ())?;
         out.clear();
         out.extend_from_slice(&self.dst[..n]);
         Ok(())
     }
     fn decompress_into(&mut self, src: &[u8], _expected: usize, out: &mut Vec<u8>) -> Result<(), ()> {
-        let n = tram_codec::decompress_into(src, &mut self.dst, &mut self.scratch).map_err(|_| ())?;
+        let n = estiba_codec::decompress_into(src, &mut self.dst, &mut self.scratch).map_err(|_| ())?;
         out.clear();
         out.extend_from_slice(&self.dst[..n]);
         Ok(())

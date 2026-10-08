@@ -1,6 +1,9 @@
 # Rust
 target/
 
+# Codec vendored dentro del módulo (regenerado por gen-codec.sh)
+gen_codec/
+
 # Kbuild (módulos fuera del árbol / artefactos de kernel)
 *.o
 *.ko

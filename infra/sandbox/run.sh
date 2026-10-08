@@ -25,7 +25,7 @@ if [ ! -e /dev/kvm ]; then
 fi
 
 echo "== [1/2] imagen sandbox =="
-podman build -t tram-sandbox .
+podman build -t estiba-sandbox .
 
 if [ "$MODE" = "imagen" ]; then
     exit 0
@@ -44,9 +44,9 @@ if [ -e /dev/kvm ]; then
 fi
 
 case "$MODE" in
-    build) podman run "${RUN_ARGS[@]}" tram-sandbox /infra/sandbox/build-kernel.sh ;;
-    test)  podman run "${RUN_ARGS[@]}" tram-sandbox /infra/sandbox/vm-test.sh ;;
-    todo)  podman run "${RUN_ARGS[@]}" tram-sandbox /infra/sandbox/build-and-test.sh ;;
+    build) podman run "${RUN_ARGS[@]}" estiba-sandbox /infra/sandbox/build-kernel.sh ;;
+    test)  podman run "${RUN_ARGS[@]}" estiba-sandbox /infra/sandbox/vm-test.sh ;;
+    todo)  podman run "${RUN_ARGS[@]}" estiba-sandbox /infra/sandbox/build-and-test.sh ;;
     *)
         echo "modo desconocido: $MODE (imagen|build|test|todo)" >&2
         exit 2

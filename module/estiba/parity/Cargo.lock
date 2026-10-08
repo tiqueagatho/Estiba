@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "estiba-bench"
+name = "estiba-codec"
+version = "0.1.0"
+
+[[package]]
+name = "estiba-codec-parity"
 version = "0.1.0"
 dependencies = [
  "estiba-codec",
 ]
-
-[[package]]
-name = "estiba-codec"
-version = "0.1.0"

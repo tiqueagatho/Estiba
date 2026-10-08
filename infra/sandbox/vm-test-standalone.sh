@@ -7,18 +7,18 @@
 # externo: los ficheros viajan DENTRO del initramfs.
 #
 # Markers esperados en el log:
-#   TRAM-BOOT-OK / TRAM-CANARY-INSMOD-OK / TRAM-CANARY-WRITE-OK
-#   TRAM-CANARY-READ-OK / TRAM-CANARY-RMMOD-OK / TRAM-OOT-INSMOD-OK
-#   TRAM-OOT-RMMOD-OK / TRAM-ALL-OK
+#   ESTIBA-BOOT-OK / ESTIBA-CANARY-INSMOD-OK / ESTIBA-CANARY-WRITE-OK
+#   ESTIBA-CANARY-READ-OK / ESTIBA-CANARY-RMMOD-OK / ESTIBA-OOT-INSMOD-OK
+#   ESTIBA-OOT-RMMOD-OK / ESTIBA-ALL-OK
 #
 # Uso:   sh infra/sandbox/vm-test-standalone.sh [LOG]
 # (el binario qemu y virtme-mkinitramfs deben existir en la imagen POD).
 
 set -u
 
-LOG="${1:-/tmp/tram-standalone.log}"
+LOG="${1:-/tmp/estiba-standalone.log}"
 : "${TREE:=/tree}"
-: "${KO_OOT:=${TREE}/infra/oot-stub/tram_oot_stub.ko}"
+: "${KO_OOT:=${TREE}/infra/oot-stub/estiba_oot_stub.ko}"
 : "${INIT_SRC:=${TREE}/infra/sandbox/init-canario.sh}"
 KO_BUILTIN="${TREE}/drivers/block/rnull_mod.ko"
 STAGE=/tmp/vmi-can
@@ -54,7 +54,7 @@ echo "== standalone canary (sin virtio) ==" > "${LOG}"
     -append "console=ttyS0 rdinit=/init" \
     -nographic </dev/null >> "${LOG}" 2>&1
 
-grep -aE "TRAM-\|rnull_mod:" "${LOG}"
-ok=$(grep -ac "TRAM-ALL-OK" "${LOG}")
+grep -aE "ESTIBA-\|rnull_mod:" "${LOG}"
+ok=$(grep -ac "ESTIBA-ALL-OK" "${LOG}")
 [ "${ok}" -ge 1 ] && echo "STANDALONE-CANARY: PASS" || echo "STANDALONE-CANARY: FAIL"
 exit 0

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-//! tram-bench: corpus canónico + baselines LZ4/LZO + gate del codec ternario.
+//! estiba-bench: corpus canónico + baselines LZ4/LZO + gate del codec propio (LZ+Huffman).
 //!
 //! Mide (baselines por `dlopen` contra liblz4/liblzo2 del sistema, sin deps de
 //! build):
-//! - ratio (media geométrica, entrada/salida) de tram vs LZ4 y vs LZO,
+//! - ratio (media geométrica, entrada/salida) de estiba vs LZ4 y vs LZO,
 //! - throughput de compresión y descompresión (MB/s) de los tres codecs,
 //! - determinismo (compress es función pura) y roundtrip del corpus + fuzzing
 //!   xorshift sembrado.
@@ -31,25 +31,25 @@ fn main() {
     let corpus = corpus::canonico();
     let fuzz = corpus::fuzz_cases();
 
-    let mut tram = baselines::Tram::new();
+    let mut estiba = baselines::Estiba::new();
     let mut lz4 = baselines::Lz4::new().unwrap_or_else(|| die("liblz4.so.1 no cargable"));
     let mut lzo = baselines::Lzo1::new().unwrap_or_else(|| die("liblzo2.so.2 no cargable"));
 
     // -- roundtrip (corpus + fuzz) y determinismo ---------------------------
-    roundtrip("tram", &mut tram, &corpus, &fuzz, true);
+    roundtrip("estiba", &mut estiba, &corpus, &fuzz, true);
     roundtrip("LZ4", &mut lz4, &corpus, &[], false);
     roundtrip("LZO", &mut lzo, &corpus, &[], false);
 
     // -- medición ------------------------------------------------------------
-    let tram_res = measure(&mut tram, &corpus);
-    detalle_tram(&mut tram, &corpus);
+    let estiba_res = measure(&mut estiba, &corpus);
+    detalle_estiba(&mut estiba, &corpus);
     let lz4_res = measure(&mut lz4, &corpus);
     let lzo_res = measure(&mut lzo, &corpus);
 
     // -- tabla ---------------------------------------------------------------
     println!();
     println!("{:<20}{:>12}{:>12}{:>12}", "codificador", "ratio", "comp MB/s", "decomp MB/s");
-    for (label, s) in [("tram (LZ+Huf)", &tram_res), ("LZ4 1.10", &lz4_res), ("LZO1X 2.10", &lzo_res)] {
+    for (label, s) in [("estiba (LZ+Huf)", &estiba_res), ("LZ4 1.10", &lz4_res), ("LZO1X 2.10", &lzo_res)] {
         println!(
             "{:<20}{:>12.2}{:>12.1}{:>12.1}",
             label,
@@ -62,12 +62,12 @@ fn main() {
     // -- gate (SPEC §1, v2) ------------------------------------------------
     println!();
     let mut fails = 0usize;
-    let ratio_t = tram_res.geo_ratio.unwrap_or(0.0);
-    let comp_t = tram_res.comp_mbs.unwrap_or(0.0);
-    let decomp_t = tram_res.decomp_mbs.unwrap_or(0.0);
-    check(&mut fails, ratio_t >= 1.50, "ratio_geomean >= 1.50x", &format!("tram {ratio_t:.2} vs criterio 1.50"));
-    check(&mut fails, comp_t >= 10.0, "comp_tput >= 10 MB/s", &format!("tram {comp_t:.1} vs criterio 10.0"));
-    check(&mut fails, decomp_t >= 10.0, "decomp_tput >= 10 MB/s", &format!("tram {decomp_t:.1} vs criterio 10.0"));
+    let ratio_t = estiba_res.geo_ratio.unwrap_or(0.0);
+    let comp_t = estiba_res.comp_mbs.unwrap_or(0.0);
+    let decomp_t = estiba_res.decomp_mbs.unwrap_or(0.0);
+    check(&mut fails, ratio_t >= 1.50, "ratio_geomean >= 1.50x", &format!("estiba {ratio_t:.2} vs criterio 1.50"));
+    check(&mut fails, comp_t >= 10.0, "comp_tput >= 10 MB/s", &format!("estiba {comp_t:.1} vs criterio 10.0"));
+    check(&mut fails, decomp_t >= 10.0, "decomp_tput >= 10 MB/s", &format!("estiba {decomp_t:.1} vs criterio 10.0"));
 
     println!();
     let rel = |a: &Option<f64>, b: &Option<f64>| -> f64 {
@@ -76,10 +76,10 @@ fn main() {
             _ => 0.0,
         }
     };
-    println!("[referencia] ratio tram/LZ4 = {:.2}  (no gate en v2)", rel(&tram_res.geo_ratio, &lz4_res.geo_ratio));
-    println!("[referencia] ratio tram/LZO = {:.2}  (no gate en v2)", rel(&tram_res.geo_ratio, &lzo_res.geo_ratio));
-    println!("[referencia] comp tram/LZ4  = {:.0}%  (no gate en v2)", 100.0 * rel(&tram_res.comp_mbs, &lz4_res.comp_mbs));
-    println!("[referencia] decomp tram/LZ4 = {:.0}%  (no gate en v2)", 100.0 * rel(&tram_res.decomp_mbs, &lz4_res.decomp_mbs));
+    println!("[referencia] ratio estiba/LZ4 = {:.2}  (no gate en v2)", rel(&estiba_res.geo_ratio, &lz4_res.geo_ratio));
+    println!("[referencia] ratio estiba/LZO = {:.2}  (no gate en v2)", rel(&estiba_res.geo_ratio, &lzo_res.geo_ratio));
+    println!("[referencia] comp estiba/LZ4  = {:.0}%  (no gate en v2)", 100.0 * rel(&estiba_res.comp_mbs, &lz4_res.comp_mbs));
+    println!("[referencia] decomp estiba/LZ4 = {:.0}%  (no gate en v2)", 100.0 * rel(&estiba_res.decomp_mbs, &lz4_res.decomp_mbs));
 
     println!();
     if fails == 0 {
@@ -214,10 +214,10 @@ fn ratio(in_b: usize, out_b: usize) -> f64 {
     }
 }
 
-/// Ratios por clase de tram (diagnóstico: dónde pierde/gana contra LZ4).
-fn detalle_tram(codec: &mut dyn Codec, corpus: &[corpus::Item]) {
+/// Ratios por clase de estiba (diagnóstico: dónde pierde/gana contra LZ4).
+fn detalle_estiba(codec: &mut dyn Codec, corpus: &[corpus::Item]) {
     let mut out: Vec<u8> = Vec::new();
-    println!("\ntram ratios por clase:");
+    println!("\nestiba ratios por clase:");
     for item in corpus {
         out.clear();
         if codec.compress_into(&item.data, &mut out).is_err() {

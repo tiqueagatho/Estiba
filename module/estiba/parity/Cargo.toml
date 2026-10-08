@@ -1,0 +1,14 @@
+[package]
+name = "estiba-codec-parity"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Paridad bit-exacta codec/ (crate) vs gen_codec/ (port no_std del kernel)"
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+estiba-codec = { path = "../../../codec" }
+
+[workspace]

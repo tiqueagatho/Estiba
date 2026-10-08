@@ -3,7 +3,7 @@
 # (virtme-ng) SIN instalar nada en el host. Prueba:
 #   1. el kernel nuevo arranca con el sufijo -rust
 #   2. el canario in-tree rnull.ko (Rust) insmod/dd/rmmod
-#   3. el stub OOT tram_oot_stub.ko (módulo Rust externo) insmod/rmmod
+#   3. el stub OOT estiba_oot_stub.ko (módulo Rust externo) insmod/rmmod
 set -euo pipefail
 TREE="${TREE:-/tree}"
 cd "$TREE"
@@ -13,7 +13,7 @@ echo "== kernelrelease: $REL =="
 
 echo "== OOT rust stub: build (make -C tree M=...) =="
 make -C "$TREE" M=/infra/oot-stub modules
-test -f /infra/oot-stub/tram_oot_stub.ko
+test -f /infra/oot-stub/estiba_oot_stub.ko
 
 echo "== VM: virtme-run (QEMU/KVM) =="
 LOG=/tmp/vm-test.log
@@ -23,7 +23,7 @@ if ! virtme-run --kdir "$TREE" --mods auto --memory 768 --show-boot-console \
 fi
 
 # Los marcadores son la fuente de verdad (poweroff corta el exit code).
-for m in TRAM-BOOT-OK TRAM-CANARY-OK TRAM-OOT-OK TRAM-ALL-OK; do
+for m in ESTIBA-BOOT-OK ESTIBA-CANARY-OK ESTIBA-OOT-OK ESTIBA-ALL-OK; do
     if ! grep -q "$m" "$LOG"; then
         echo "== VM TEST FAIL: falta marcador $m =="
         exit 1

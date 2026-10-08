@@ -29,6 +29,6 @@ echo "== [4/4] build =="
 make -j"$(nproc)"
 
 REL="$(make -s kernelrelease)"
-echo "TRAM-KERNEL-BUILD-OK kernelrelease=$REL"
+echo "ESTIBA-KERNEL-BUILD-OK kernelrelease=$REL"
 test -f "$TREE/arch/x86/boot/bzImage"
 test -f "$TREE/drivers/block/rnull_mod.ko"

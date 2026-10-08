@@ -49,7 +49,8 @@ impl Estiba {
 pub trait Codec {
     fn name(&self) -> &str;
     fn compress_into(&mut self, src: &[u8], out: &mut Vec<u8>) -> Result<(), ()>;
-    fn decompress_into(&mut self, src: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<(), ()>;
+    fn decompress_into(&mut self, src: &[u8], expected: usize, out: &mut Vec<u8>)
+        -> Result<(), ()>;
 }
 
 impl Codec for Estiba {
@@ -63,8 +64,14 @@ impl Codec for Estiba {
         out.extend_from_slice(&self.dst[..n]);
         Ok(())
     }
-    fn decompress_into(&mut self, src: &[u8], _expected: usize, out: &mut Vec<u8>) -> Result<(), ()> {
-        let n = estiba_codec::decompress_into(src, &mut self.dst, &mut self.scratch).map_err(|_| ())?;
+    fn decompress_into(
+        &mut self,
+        src: &[u8],
+        _expected: usize,
+        out: &mut Vec<u8>,
+    ) -> Result<(), ()> {
+        let n =
+            estiba_codec::decompress_into(src, &mut self.dst, &mut self.scratch).map_err(|_| ())?;
         out.clear();
         out.extend_from_slice(&self.dst[..n]);
         Ok(())
@@ -73,8 +80,10 @@ impl Codec for Estiba {
 
 // -- LZ4 ---------------------------------------------------------------------
 
-type Lz4Compress = extern "C" fn(src: *const u8, dst: *mut u8, src_size: c_int, dst_cap: c_int) -> c_int;
-type Lz4Decompress = extern "C" fn(src: *const u8, dst: *mut u8, comp: c_int, dst_cap: c_int) -> c_int;
+type Lz4Compress =
+    extern "C" fn(src: *const u8, dst: *mut u8, src_size: c_int, dst_cap: c_int) -> c_int;
+type Lz4Decompress =
+    extern "C" fn(src: *const u8, dst: *mut u8, comp: c_int, dst_cap: c_int) -> c_int;
 
 pub struct Lz4 {
     comp: Lz4Compress,
@@ -91,7 +100,11 @@ impl Lz4 {
             }
             let comp = load::<Lz4Compress>(h, "LZ4_compress_default")?;
             let decomp = load::<Lz4Decompress>(h, "LZ4_decompress_safe")?;
-            Some(Lz4 { comp, decomp, buf: Vec::new() })
+            Some(Lz4 {
+                comp,
+                decomp,
+                buf: Vec::new(),
+            })
         }
     }
 }
@@ -116,7 +129,12 @@ impl Codec for Lz4 {
         out.extend_from_slice(&self.buf[..n as usize]);
         Ok(())
     }
-    fn decompress_into(&mut self, src: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<(), ()> {
+    fn decompress_into(
+        &mut self,
+        src: &[u8],
+        expected: usize,
+        out: &mut Vec<u8>,
+    ) -> Result<(), ()> {
         self.buf.resize(expected, 0);
         let n = (self.decomp)(
             src.as_ptr(),
@@ -135,8 +153,20 @@ impl Codec for Lz4 {
 
 // -- LZO1X -------------------------------------------------------------------
 
-type LzoCompress = extern "C" fn(src: *const u8, src_len: usize, dst: *mut u8, dst_len: *mut usize, wrkmem: *mut u8) -> c_int;
-type LzoDecompress = extern "C" fn(src: *const u8, src_len: usize, dst: *mut u8, dst_len: *mut usize, wrkmem: *mut u8) -> c_int;
+type LzoCompress = extern "C" fn(
+    src: *const u8,
+    src_len: usize,
+    dst: *mut u8,
+    dst_len: *mut usize,
+    wrkmem: *mut u8,
+) -> c_int;
+type LzoDecompress = extern "C" fn(
+    src: *const u8,
+    src_len: usize,
+    dst: *mut u8,
+    dst_len: *mut usize,
+    wrkmem: *mut u8,
+) -> c_int;
 
 pub struct Lzo1 {
     comp: LzoCompress,
@@ -155,7 +185,12 @@ impl Lzo1 {
             let comp = load::<LzoCompress>(h, "lzo1x_1_compress")?;
             let decomp = load::<LzoDecompress>(h, "lzo1x_decompress_safe")?;
             // LZO1X_1_MEM_COMPRESS ≈ 64 KiB; damos holgura para el wrkmem.
-            Some(Lzo1 { comp, decomp, buf: Vec::new(), wrkmem: vec![0u8; 1 << 20] })
+            Some(Lzo1 {
+                comp,
+                decomp,
+                buf: Vec::new(),
+                wrkmem: vec![0u8; 1 << 20],
+            })
         }
     }
 }
@@ -182,7 +217,12 @@ impl Codec for Lzo1 {
         out.extend_from_slice(&self.buf[..out_len]);
         Ok(())
     }
-    fn decompress_into(&mut self, src: &[u8], expected: usize, out: &mut Vec<u8>) -> Result<(), ()> {
+    fn decompress_into(
+        &mut self,
+        src: &[u8],
+        expected: usize,
+        out: &mut Vec<u8>,
+    ) -> Result<(), ()> {
         self.buf.resize(expected, 0);
         let mut out_len = self.buf.len();
         let rc = (self.decomp)(

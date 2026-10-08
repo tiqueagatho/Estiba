@@ -11,7 +11,7 @@
 //! `ratio >= LZ4` para cualquier LZ+Huffman, porque LZ4 colapsa runs puros a
 //! ~8 B/token mientras que las páginas reales con swap tienen menos runs y más
 //! mitad.
-  
+
 pub struct Item {
     pub name: &'static str,
     pub data: Vec<u8>,
@@ -145,11 +145,46 @@ fn stack_frames(seed: u64, n: usize) -> Vec<u8> {
 /// determinista, mayúsculas al inicio, puntuación, saltos de línea).
 fn text_utf8(seed: u64, n: usize) -> Vec<u8> {
     const WORDS: &[&str] = &[
-        "el", "que", "de", "los", "y", "una", "las", "se", "en", "para",
-        "con", "del", "por", "al", "como", "su", "esta", "o", "tambien",
-        "otra", "port", "socket", "buffer", "memoria", "pagina", "swap",
-        "nucleo", "proceso", "tabla", "datos", "registro", "cursor", "flujo",
-        "contexto", "prioridad", "cola", "trabajo", "evento", "saga", "estado",
+        "el",
+        "que",
+        "de",
+        "los",
+        "y",
+        "una",
+        "las",
+        "se",
+        "en",
+        "para",
+        "con",
+        "del",
+        "por",
+        "al",
+        "como",
+        "su",
+        "esta",
+        "o",
+        "tambien",
+        "otra",
+        "port",
+        "socket",
+        "buffer",
+        "memoria",
+        "pagina",
+        "swap",
+        "nucleo",
+        "proceso",
+        "tabla",
+        "datos",
+        "registro",
+        "cursor",
+        "flujo",
+        "contexto",
+        "prioridad",
+        "cola",
+        "trabajo",
+        "evento",
+        "saga",
+        "estado",
     ];
     let mut x = Xs(seed);
     let mut v = Vec::with_capacity(n + 64);
@@ -263,7 +298,11 @@ fn db_rows(seed: u64, n: usize) -> Vec<u8> {
             v.push((x.below(3) + 1) as u8);
         }
         for _ in 0..(8 + x.below(48) as usize) {
-            v.push(if x.below(4) == 0 { 0 } else { (x.below(0x7F) | 0x20) as u8 });
+            v.push(if x.below(4) == 0 {
+                0
+            } else {
+                (x.below(0x7F) | 0x20) as u8
+            });
         }
         v.extend_from_slice(b"\n");
     }
@@ -321,7 +360,11 @@ fn entropica(seed: u64, n: usize) -> Vec<u8> {
     let mut x = Xs(seed);
     let mut v = vec![0u8; n];
     for i in 0..n {
-        v[i] = if x.below(3) == 0 { (x.next() >> 40) as u8 } else { (x.next() >> 56) as u8 };
+        v[i] = if x.below(3) == 0 {
+            (x.next() >> 40) as u8
+        } else {
+            (x.next() >> 56) as u8
+        };
     }
     v
 }
@@ -330,32 +373,85 @@ fn entropica(seed: u64, n: usize) -> Vec<u8> {
 /// swap típicas del host"; este host es x86-64 PAGE_SIZE).
 pub fn canonico() -> Vec<Item> {
     vec![
-        Item { name: "heap-ptrs-4k", data: heap_ptrs(0x1E41, 4096) },
-        Item { name: "heap-ptrs32-4k", data: heap_ptrs32(0x1E32, 4096) },
-        Item { name: "malloc-meta-4k", data: malloc_metadata(0x9A11, 4096) },
-        Item { name: "stack-frames-4k", data: stack_frames(0x5F4, 4096) },
-        Item { name: "texto-utf8-4k", data: text_utf8(0x7E12, 4096) },
-        Item { name: "utf16-ui-4k", data: utf16_text(0x0016, 4096) },
-        Item { name: "bitmap-dirty-4k", data: bitmap_dirty(0x1E1F, 4096) },
-        Item { name: "gc-heap-4k", data: gc_heap(0x0CC, 4096) },
-        Item { name: "hashmap-buckets-4k", data: hashmap_buckets(0x1488, 4096) },
-        Item { name: "db-rows-4k", data: db_rows(0x08, 4096) },
-        Item { name: "linked-list-4k", data: linked_list(0x11A5, 4096) },
-        Item { name: "sparse-struct-4k", data: sparse_struct(0x5B1E, 4096) },
-        Item { name: "texto-utf8-large", data: text_utf8(0xB0A2, 16384) },
+        Item {
+            name: "heap-ptrs-4k",
+            data: heap_ptrs(0x1E41, 4096),
+        },
+        Item {
+            name: "heap-ptrs32-4k",
+            data: heap_ptrs32(0x1E32, 4096),
+        },
+        Item {
+            name: "malloc-meta-4k",
+            data: malloc_metadata(0x9A11, 4096),
+        },
+        Item {
+            name: "stack-frames-4k",
+            data: stack_frames(0x5F4, 4096),
+        },
+        Item {
+            name: "texto-utf8-4k",
+            data: text_utf8(0x7E12, 4096),
+        },
+        Item {
+            name: "utf16-ui-4k",
+            data: utf16_text(0x0016, 4096),
+        },
+        Item {
+            name: "bitmap-dirty-4k",
+            data: bitmap_dirty(0x1E1F, 4096),
+        },
+        Item {
+            name: "gc-heap-4k",
+            data: gc_heap(0x0CC, 4096),
+        },
+        Item {
+            name: "hashmap-buckets-4k",
+            data: hashmap_buckets(0x1488, 4096),
+        },
+        Item {
+            name: "db-rows-4k",
+            data: db_rows(0x08, 4096),
+        },
+        Item {
+            name: "linked-list-4k",
+            data: linked_list(0x11A5, 4096),
+        },
+        Item {
+            name: "sparse-struct-4k",
+            data: sparse_struct(0x5B1E, 4096),
+        },
+        Item {
+            name: "texto-utf8-large",
+            data: text_utf8(0xB0A2, 16384),
+        },
         // Páginas triviales, con peso bajo (raras en swap real):
-        Item { name: "swap-limpia-4k", data: swap_limpia(0xA11CE, 4096) },
-        Item { name: "zeros-4k", data: zeros(4096) },
+        Item {
+            name: "swap-limpia-4k",
+            data: swap_limpia(0xA11CE, 4096),
+        },
+        Item {
+            name: "zeros-4k",
+            data: zeros(4096),
+        },
         // Cola incompresible (presente en cualquier carga real):
-        Item { name: "aleatoria-4k", data: random(0xF00D, 4096) },
-        Item { name: "entropica-4k", data: entropica(0xE4710, 4096) },
+        Item {
+            name: "aleatoria-4k",
+            data: random(0xF00D, 4096),
+        },
+        Item {
+            name: "entropica-4k",
+            data: entropica(0xE4710, 4096),
+        },
     ]
 }
 
 /// Fuzzing determinista sembrado (SPEC §1): tamaños variados × semillas fijas,
 /// además de páginas swap-real a 4K y un par de casos límite (1 B, 65535 B).
 pub fn fuzz_cases() -> Vec<Vec<u8>> {
-    let sizes = [1usize, 15, 63, 127, 255, 256, 1023, 4095, 4096, 16384, 65535];
+    let sizes = [
+        1usize, 15, 63, 127, 255, 256, 1023, 4095, 4096, 16384, 65535,
+    ];
     let mut v: Vec<Vec<u8>> = Vec::new();
     for seed in [1u64, 7, 42, 0xC0DEC] {
         for s in sizes {

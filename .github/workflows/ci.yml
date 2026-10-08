@@ -1,0 +1,41 @@
+name: CI
+
+# CI cubre lo que corre en un runner estándar: formato, build del workspace,
+# tests del códec y el harness de paridad bit-exacta codec ⇔ port del kernel.
+#
+# El driver `estiba.ko` NO se compila aquí: requiere un kernel con
+# CONFIG_RUST=y compilado a medida. Su build y validación (insmod + dd/cmp +
+# swapon) viven en infra/sandbox/ y se ejecutan en una VM QEMU/KVM, nunca en
+# el host. Ver docs/SPEC-estiba.md (§4, §5).
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formato (rustfmt)
+        run: cargo fmt --all -- --check
+
+      - name: Compilar workspace
+        run: cargo build --workspace --locked
+
+      - name: Tests del códec (17)
+        run: cargo test -p estiba-codec --features alloc --locked
+
+      - name: Paridad bit-exacta (codec ⇔ port del kernel)
+        run: make -C module/estiba parity

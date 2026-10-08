@@ -318,14 +318,18 @@ mod tests {
         for (i, o) in order.iter_mut().enumerate() {
             *o = i as u8;
         }
-        order.sort_by(|&a, &b| counts[b as usize].cmp(&counts[a as usize]).then_with(|| a.cmp(&b)));
+        order.sort_by(|&a, &b| {
+            counts[b as usize]
+                .cmp(&counts[a as usize])
+                .then_with(|| a.cmp(&b))
+        });
         let tbl = code_tables(&counts, 4, &order);
         assert!(!tbl.over_cap);
         assert_eq!(tbl.lengths[3], 2); // D
         assert_eq!(tbl.lengths[2], 2); // C
         assert_eq!(tbl.lengths[0], 2); // A
         assert_eq!(tbl.lengths[1], 2); // B
-        // Códigos canónicos por símbolo: A=0, B=1, C=2, D=3 (2 bits).
+                                       // Códigos canónicos por símbolo: A=0, B=1, C=2, D=3 (2 bits).
         assert_eq!(tbl.codes[0], 0);
         assert_eq!(tbl.codes[1], 1);
         assert_eq!(tbl.codes[2], 2);
@@ -344,8 +348,15 @@ mod tests {
         for i in 0..256 {
             order[i] = i as u8;
         }
-        order.sort_by(|&a, &b| counts[b as usize].cmp(&counts[a as usize]).then_with(|| a.cmp(&b)));
-        let k = order.iter().position(|&v| counts[v as usize] == 0).unwrap_or(256);
+        order.sort_by(|&a, &b| {
+            counts[b as usize]
+                .cmp(&counts[a as usize])
+                .then_with(|| a.cmp(&b))
+        });
+        let k = order
+            .iter()
+            .position(|&v| counts[v as usize] == 0)
+            .unwrap_or(256);
         for s in 0..k {
             v2s[order[s] as usize] = s as u8;
         }

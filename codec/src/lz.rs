@@ -205,11 +205,7 @@ pub fn literal_total(tok: &[u8]) -> Result<usize, CodecError> {
 /// Recorre las corridas de literales de `src` según los tokens y aplica `f` a
 /// cada byte literal. Devuelve el total de literales procesados. Suscribe
 /// además el seguimiento de posición para validar los límites de `src`.
-pub fn fold_literals(
-    src: &[u8],
-    tok: &[u8],
-    mut f: impl FnMut(u8),
-) -> Result<usize, CodecError> {
+pub fn fold_literals(src: &[u8], tok: &[u8], mut f: impl FnMut(u8)) -> Result<usize, CodecError> {
     let mut sp = 0usize;
     let mut total = 0usize;
     walk(tok, &mut |tk| {

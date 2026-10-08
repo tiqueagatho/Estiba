@@ -83,7 +83,10 @@ pub fn compress_into(
 
     // 1) LZ: tokens en scratch[..t]; el resto acoge la entropía.
     let t = lz::tokenize(src, scratch, ht)?;
-    debug_assert!(ht.len() >= lz::HASH_TAB_LEN, "ht debe tener lz::HASH_TAB_LEN");
+    debug_assert!(
+        ht.len() >= lz::HASH_TAB_LEN,
+        "ht debe tener lz::HASH_TAB_LEN"
+    );
 
     // 2)+3) valores + Huffman en scratch[t..].
     let (tok_part, ent_part) = scratch.split_at_mut(t);
@@ -91,7 +94,11 @@ pub fn compress_into(
         Ok(v) => v,
         Err(_) => usize::MAX, // promueve a RAW
     };
-    let total = if used != usize::MAX { t + used } else { usize::MAX };
+    let total = if used != usize::MAX {
+        t + used
+    } else {
+        usize::MAX
+    };
 
     // 4) RAW fallback si no mejora.
     let (flags, plen) = if total != usize::MAX && total < HEADER_LEN + n {
@@ -189,7 +196,12 @@ pub fn decompress_into(
 }
 
 /// Reconstruye la página desde tokens+entropía.
-fn restore_payload(payload: &[u8], dst: &mut [u8], scratch: &mut [u8], expected: usize) -> Result<usize, CodecError> {
+fn restore_payload(
+    payload: &[u8],
+    dst: &mut [u8],
+    scratch: &mut [u8],
+    expected: usize,
+) -> Result<usize, CodecError> {
     // 1) Separar tokens (fin marcado estructuralmente).
     let te = lz::token_end(payload).ok_or(CodecError::Slot)?;
     let tok = &payload[..te];
@@ -286,7 +298,11 @@ pub fn crc16(data: &[u8]) -> u16 {
     for &b in data {
         crc ^= b as u16;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xA001 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xA001
+            } else {
+                crc >> 1
+            };
         }
     }
     crc
@@ -394,7 +410,9 @@ mod tests {
         let mut d = Vec::new();
         d.reserve(4096);
         for _ in 0..4096 {
-            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             d.push((x >> 32) as u8);
         }
         roundtrip(&d);

@@ -48,8 +48,15 @@ fn main() {
 
     // -- tabla ---------------------------------------------------------------
     println!();
-    println!("{:<20}{:>12}{:>12}{:>12}", "codificador", "ratio", "comp MB/s", "decomp MB/s");
-    for (label, s) in [("estiba (LZ+Huf)", &estiba_res), ("LZ4 1.10", &lz4_res), ("LZO1X 2.10", &lzo_res)] {
+    println!(
+        "{:<20}{:>12}{:>12}{:>12}",
+        "codificador", "ratio", "comp MB/s", "decomp MB/s"
+    );
+    for (label, s) in [
+        ("estiba (LZ+Huf)", &estiba_res),
+        ("LZ4 1.10", &lz4_res),
+        ("LZO1X 2.10", &lzo_res),
+    ] {
         println!(
             "{:<20}{:>12.2}{:>12.1}{:>12.1}",
             label,
@@ -65,9 +72,24 @@ fn main() {
     let ratio_t = estiba_res.geo_ratio.unwrap_or(0.0);
     let comp_t = estiba_res.comp_mbs.unwrap_or(0.0);
     let decomp_t = estiba_res.decomp_mbs.unwrap_or(0.0);
-    check(&mut fails, ratio_t >= 1.50, "ratio_geomean >= 1.50x", &format!("estiba {ratio_t:.2} vs criterio 1.50"));
-    check(&mut fails, comp_t >= 10.0, "comp_tput >= 10 MB/s", &format!("estiba {comp_t:.1} vs criterio 10.0"));
-    check(&mut fails, decomp_t >= 10.0, "decomp_tput >= 10 MB/s", &format!("estiba {decomp_t:.1} vs criterio 10.0"));
+    check(
+        &mut fails,
+        ratio_t >= 1.50,
+        "ratio_geomean >= 1.50x",
+        &format!("estiba {ratio_t:.2} vs criterio 1.50"),
+    );
+    check(
+        &mut fails,
+        comp_t >= 10.0,
+        "comp_tput >= 10 MB/s",
+        &format!("estiba {comp_t:.1} vs criterio 10.0"),
+    );
+    check(
+        &mut fails,
+        decomp_t >= 10.0,
+        "decomp_tput >= 10 MB/s",
+        &format!("estiba {decomp_t:.1} vs criterio 10.0"),
+    );
 
     println!();
     let rel = |a: &Option<f64>, b: &Option<f64>| -> f64 {
@@ -76,10 +98,22 @@ fn main() {
             _ => 0.0,
         }
     };
-    println!("[referencia] ratio estiba/LZ4 = {:.2}  (no gate en v2)", rel(&estiba_res.geo_ratio, &lz4_res.geo_ratio));
-    println!("[referencia] ratio estiba/LZO = {:.2}  (no gate en v2)", rel(&estiba_res.geo_ratio, &lzo_res.geo_ratio));
-    println!("[referencia] comp estiba/LZ4  = {:.0}%  (no gate en v2)", 100.0 * rel(&estiba_res.comp_mbs, &lz4_res.comp_mbs));
-    println!("[referencia] decomp estiba/LZ4 = {:.0}%  (no gate en v2)", 100.0 * rel(&estiba_res.decomp_mbs, &lz4_res.decomp_mbs));
+    println!(
+        "[referencia] ratio estiba/LZ4 = {:.2}  (no gate en v2)",
+        rel(&estiba_res.geo_ratio, &lz4_res.geo_ratio)
+    );
+    println!(
+        "[referencia] ratio estiba/LZO = {:.2}  (no gate en v2)",
+        rel(&estiba_res.geo_ratio, &lzo_res.geo_ratio)
+    );
+    println!(
+        "[referencia] comp estiba/LZ4  = {:.0}%  (no gate en v2)",
+        100.0 * rel(&estiba_res.comp_mbs, &lz4_res.comp_mbs)
+    );
+    println!(
+        "[referencia] decomp estiba/LZ4 = {:.0}%  (no gate en v2)",
+        100.0 * rel(&estiba_res.decomp_mbs, &lz4_res.decomp_mbs)
+    );
 
     println!();
     if fails == 0 {
@@ -107,12 +141,27 @@ fn roundtrip(
     let mut slot: Vec<u8> = Vec::new();
     let mut out: Vec<u8> = Vec::new();
     for item in corpus {
-        test_io(label, codec, &item.data, &mut slot, &mut out, det, &item.name);
+        test_io(
+            label, codec, &item.data, &mut slot, &mut out, det, &item.name,
+        );
     }
     for (i, fc) in fuzz.iter().enumerate() {
-        test_io(label, codec, fc, &mut slot, &mut out, det, &format!("fuzz#{i}"));
+        test_io(
+            label,
+            codec,
+            fc,
+            &mut slot,
+            &mut out,
+            det,
+            &format!("fuzz#{i}"),
+        );
     }
-    println!("[{:>8}] roundtrip: {} items + {} fuzz", "PASS", corpus.len(), fuzz.len());
+    println!(
+        "[{:>8}] roundtrip: {} items + {} fuzz",
+        "PASS",
+        corpus.len(),
+        fuzz.len()
+    );
 }
 
 fn test_io(
@@ -136,7 +185,10 @@ fn test_io(
     }
     out.clear();
     if codec.decompress_into(slot, src.len(), out).is_err() {
-        die(&format!("{label} no descomprime `{name}` (slot {} B)", slot.len()));
+        die(&format!(
+            "{label} no descomprime `{name}` (slot {} B)",
+            slot.len()
+        ));
     }
     if *out != src {
         die(&format!("{label} roundtrip distinto en `{name}`"));
@@ -223,7 +275,13 @@ fn detalle_estiba(codec: &mut dyn Codec, corpus: &[corpus::Item]) {
         if codec.compress_into(&item.data, &mut out).is_err() {
             continue;
         }
-        println!("  {:>18} {:>5} B -> {:>5} B  ({:.2}x)", item.name, item.data.len(), out.len(), ratio(item.data.len(), out.len()));
+        println!(
+            "  {:>18} {:>5} B -> {:>5} B  ({:.2}x)",
+            item.name,
+            item.data.len(),
+            out.len(),
+            ratio(item.data.len(), out.len())
+        );
     }
 }
 
@@ -239,5 +297,8 @@ fn check(fails: &mut usize, pass: bool, label: &str, detail: &str) {
     if !pass {
         *fails += 1;
     }
-    println!("[{:>4}] {label:<24} {detail}", if pass { "PASS" } else { "FAIL" });
+    println!(
+        "[{:>4}] {label:<24} {detail}",
+        if pass { "PASS" } else { "FAIL" }
+    );
 }

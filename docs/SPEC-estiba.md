@@ -2,7 +2,8 @@
 
 Estado: en desarrollo. Fase 0 (kernel 6.12 + `CONFIG_RUST=y` + canarios)
 **PASS en sandbox**. Fase 2b (codec + bench + gate v2) **PASS 2026-10-08**.
-Fase 3 (`estiba.ko`) **en curso**.
+Fase 3 (`estiba.ko`) **PASS 2026-10-08** en VM (insmod + roundtrip +
+swapon). Licencia dual GPL-2.0/MIT.
 
 ---
 
@@ -195,16 +196,24 @@ bitstream comprimido byte a byte, roundtrip de cada motor y **cross-decoding**
 
 ---
 
-## 4. estiba.ko (módulo de bloque Rust, Fase 3 — en curso)
+## 4. estiba.ko (módulo de bloque Rust, Fase 3 — PASS)
 
-- API `kernel::block::mq` (como `samples/rust/rnull.rs`, que ya carga en la VM).
+- API `kernel::block::mq` (como `samples/rust/rnull.rs`).
 - `queue_rq` síncrono: itera los bios, extrae vectores, `kmap_local_page`,
   comprime/descomprime por slot. Todo fallo se audita y **siempre** se completa
   el request (OK o `BLK_STS_IOERR`); nunca `?` que lo dejaría colgado.
-- Almacén: `KVec<Option<KVec<u8>>>` + scratch + tabla hash por dispositivo
-  (`GFP_KERNEL`).
-- Backend de writeback (trait): `Ninguno` (RAM pura) y `Ssd` — off por defecto.
-- Se valida en VM: insmod → `dd` + `cmp` + `swapon` sobre un archivo en memoria.
+- **`queue_rq` no puede dormir**: el almacén se serializa con un **spinlock
+  propio** (`AtomicBool`) y la única asignación del camino lo hace con
+  `GFP_ATOMIC`. El store (slots + scratch + tabla hash) se asigna una vez en
+  `init` (`KBox::leak`) y se referencia por `AtomicPtr` (el kernel 6.12 no
+  expone `OnceLock`).
+- El slot se deriva de `bvec_iter.bi_sector` (no de `rq->__sector`) y la página
+  a mapear es `bv_page + off/PAGE_SIZE`: un `bio_vec` puede cubrir **folios
+  grandes** (varias páginas), no siempre una.
+- Se valida en VM: insmod → `dd`/`cmp` (ceros y aleatorio 4 MiB) + `swapon`.
+- **Limitaciones v1**: solo segmentos 4 KiB alineados (swap y `dd bs=4K`
+  cumplen); sin sysfs propio (el crate kernel 6.12 no expone kobject/sysfs):
+  stats por `pr_info!` al descargar + `/sys/block/estiba/stat`.
 
 ---
 
@@ -234,7 +243,7 @@ bitstream comprimido byte a byte, roundtrip de cada motor y **cross-decoding**
 | 0 | Sandbox QEMU + kernel custom `CONFIG_RUST=y` + canarios | ✅ |
 | 1 | Códec (LZ + entropía, CRC, RAW) + formato | ✅ |
 | 2 | Verificación (parity bit-exacta + fuzz) + bench + gate v2 | ✅ |
-| 3 | `estiba.ko` validado en VM (roundtrip + swapon) | 🚧 |
+| 3 | `estiba.ko` validado en VM (roundtrip + swapon) | ✅ |
 | 4 | **Problemas de sistema** (donde hay margen de aporte real): páginas idénticas/cero, asignador de objetos de tamaño variable (≈`zsmalloc`), writeback, dedup, aging hot/cold | ⬜ |
 | 5 | `estiba-ctl`, CI, distribución | ⬜ |
 
@@ -244,6 +253,25 @@ bitstream comprimido byte a byte, roundtrip de cada motor y **cross-decoding**
 
 ## 8. Registro de cambios
 
+- **2026-10-08 — Fase 3: `estiba.ko` PASS en VM**. Primer módulo de bloque
+  comprimido que arranca, hace `insmod`, roundtrip `dd`/`cmp` de 4 MiB (ceros y
+  aleatorio) y `swapon`/`swapoff` reales, todo dentro de un **initramfs busybox
+  autocontenido en QEMU/KVM** (nada en el host). Tres bugs resueltos:
+  1. **Stack overflow (13 KiB) en `queue_rq`**: el compilador inlineaba
+     `compress_into`→`build_entropy`→`code_tables`→`huff_lengths`, cuyos arrays
+     (`counts [u32;256]`, `Tables`, `freq`/`fq [u64;512]`) sumaban > pila del
+     kernel. Fix en el códec: `#[inline(never)]` en las entradas, `fq`/`freq` a
+     **u32** y sin duplicar el buffer, `values::alphabet` con `sort_unstable_by`
+     (core, sin alloc), `compress_bound` como `const fn`. Frame 13 KiB → 7 KiB.
+  2. **Mapeo de folios grandes**: un `bio_vec` puede cubrir varias páginas y
+     hacíamos `kmap_local_page(bv_page)` siempre (la cabeza) → corrupción
+     localizada en transferencias grandes. Fix: mapear
+     `bv_page + (bv_offset+done)/PAGE_SIZE`.
+  3. **Slot desde `bi_iter.bi_sector`**: los bios de lectura pueden empezar con
+     `bi_idx != 0`; usar `rq->__sector` desplazaba el mapeo.
+  Además: spinlock propio + `GFP_ATOMIC` (queue_rq no puede dormir) y
+  `bindings`/`KBox` correctos; el sandbox pasa a initramfs busybox (virtme
+  fallaba por falta de virtio-serial/rootfs).
 - **2026-10-08 — replanteo y renombrado `tRAM` → `estiba`**. Se abandona la
   premisa ternaria (nunca aportó ratio; ver §9) y el proyecto se reposiciona
   como **zram en Rust, memory-safe y verificado** (el aporte es de ingeniería

@@ -48,7 +48,7 @@ superar a zstd), sino *cómo* está hecho:
 |---|---|
 | Codec + formato (v3) | ✅ Validado: tests bit-exactos + benchmark con páginas de swap reales (gate verde 3/3). |
 | Kernel custom (sandbox) | ✅ Compila y arranca en VM con `CONFIG_RUST=y` |
-| Driver `estiba.ko` | 🚧 **En desarrollo** (Fase 3): aún no validado en VM |
+| Driver `estiba.ko` | ✅ Validado en VM: `insmod` + roundtrip + `swapon` (Fase 3) |
 | Uso en un equipo real | ❌ **Fuera de alcance por ahora** |
 
 **No lo uses todavía como sistema de swap de un equipo de verdad.** Funciona

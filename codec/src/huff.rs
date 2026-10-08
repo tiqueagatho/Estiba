@@ -25,13 +25,12 @@ pub struct Tables {
 }
 
 /// Longitudes de código Huffman para k símbolos (freq[sym] = counts[valor]).
-fn huff_lengths(freq: &[u64; 512], k: usize) -> ([u8; 512], u8) {
+/// Longitudes de Huffman. Reusa el búfer `fq` del caller como montículo de
+/// frecuencias (u32: el total de literales de una página cabe de sobra), para
+/// no duplicarlo en la pila — crítico en el kernel (pila pequeña).
+fn huff_lengths(fq: &mut [u32; 512], k: usize) -> ([u8; 512], u8) {
     const NONE: u16 = 0xFFFF;
-    let mut fq = [0u64; 512];
     let mut par = [NONE; 512];
-    for s in 0..k {
-        fq[s] = freq[s];
-    }
     let mut n_nodes = k;
 
     loop {
@@ -88,11 +87,11 @@ fn huff_lengths(freq: &[u64; 512], k: usize) -> ([u8; 512], u8) {
 /// `values::alphabet`). `tbl.lengths`/`tbl.codes` están indexados por
 /// SÍMBOLO (0..k); en `lib.rs` se mapea valor -> símbolo con `v2s`.
 pub fn code_tables(counts: &[u32; 256], k: usize, order: &[u8; 256]) -> Tables {
-    let mut freq = [0u64; 512];
+    let mut freq = [0u32; 512];
     for s in 0..k {
-        freq[s] = counts[order[s] as usize] as u64;
+        freq[s] = counts[order[s] as usize];
     }
-    let (lengths, max_len) = huff_lengths(&freq, k);
+    let (lengths, max_len) = huff_lengths(&mut freq, k);
 
     let mut tbl = Tables {
         lengths: [0; 256],

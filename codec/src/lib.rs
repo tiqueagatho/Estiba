@@ -52,7 +52,8 @@ pub const MAX_INPUT_LEN: usize = 0xFFFF;
 pub const C_MAX: usize = huff::C_MAX_BITS;
 
 /// Cota del slot comprimido para una entrada de `n` bytes.
-pub fn compress_bound(input_len: usize) -> usize {
+/// `const fn`: el driver la usa para dimensionar búferes en constantes.
+pub const fn compress_bound(input_len: usize) -> usize {
     debug_assert!(input_len <= MAX_INPUT_LEN);
     // tokens ≤ n+2 (instrucciones de literal de 1 B + fin), bits ≤ n*C_MAX/8,
     // sección de entropía (K+2K+1) ≤ 513, cabecera 10, margen 16.
@@ -62,6 +63,7 @@ pub fn compress_bound(input_len: usize) -> usize {
 /// Compresión. `dst` y `scratch` deben tener `compress_bound(n)`; `ht` debe
 /// tener `lz::HASH_TAB_LEN` entradas (el caller aporta su tabla; en el kernel
 /// vive en el estado del dispositivo, nunca en la pila).
+#[inline(never)]
 pub fn compress_into(
     src: &[u8],
     dst: &mut [u8],
@@ -119,6 +121,7 @@ pub fn compress_into(
 
 /// Construye la sección de entropía en `dst` (tras los tokens): K+alfabeto+
 /// longitudes + bitstream de los símbolos. Devuelve bytes usados.
+#[inline(never)]
 fn build_entropy(src: &[u8], tok: &[u8], dst: &mut [u8]) -> Result<usize, CodecError> {
     // Recuento de valores de los literales (una pasada sobre los tokens).
     let mut counts = [0u32; 256];
@@ -160,6 +163,7 @@ fn build_entropy(src: &[u8], tok: &[u8], dst: &mut [u8]) -> Result<usize, CodecE
 }
 
 /// Descompresión. `scratch` debe tener `compress_bound(input_len)`.
+#[inline(never)]
 pub fn decompress_into(
     slot: &[u8],
     dst: &mut [u8],
@@ -196,6 +200,7 @@ pub fn decompress_into(
 }
 
 /// Reconstruye la página desde tokens+entropía.
+#[inline(never)]
 fn restore_payload(
     payload: &[u8],
     dst: &mut [u8],

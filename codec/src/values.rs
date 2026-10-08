@@ -12,8 +12,10 @@ pub fn alphabet(counts: &[u32; 256]) -> (usize, [u8; 256], [u8; 256]) {
     for (i, o) in order.iter_mut().enumerate() {
         *o = i as u8;
     }
-    // Orden: count desc, valor asc.
-    order.sort_by(|&a, &b| {
+    // Orden: count desc, valor asc. El comparador es TOTAL (desempata por
+    // valor), así que `sort_unstable_by` (core, sin alloc) da el mismo orden
+    // que el `sort_by` estable de std.
+    order.sort_unstable_by(|&a, &b| {
         counts[b as usize]
             .cmp(&counts[a as usize])
             .then_with(|| a.cmp(&b))

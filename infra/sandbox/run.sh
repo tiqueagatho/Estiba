@@ -37,6 +37,7 @@ RUN_ARGS=(
     --security-opt label=disable
     -v "$TREE":/tree:rw
     -v "$(cd .. && pwd)":/infra:rw
+    -v "$(cd ../.. && pwd)":/estiba:rw
     -e TREE=/tree
 )
 if [ -e /dev/kvm ]; then

@@ -24,7 +24,8 @@
 //!     `/sys/block/estiba/stat`.
 
 use kernel::{
-    alloc::{flags, KVec},
+    alloc::{flags, KBox, KVec},
+    bindings,
     block::mq::{self, gen_disk, Operations, TagSet},
     error::{code, Result},
     new_mutex, pr_info,
@@ -36,7 +37,7 @@ use kernel::{
 #[path = "gen_codec/lib.rs"]
 mod codec;
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 /// Geometría del disco (512 B/sector; slot de 4 KiB).
 const DISK_SIZE: u64 = 4 << 20; // 4 MiB
@@ -59,9 +60,37 @@ const FLAG_RAW_BIT: u8 = 1;
 
 // ---------------------------------------------------------------------------
 // Estado global del dispositivo (1 disco v1).
+//
+// El kernel 6.12 NO expone `OnceLock` ni locks con constructor `const`, así
+// que el store se asigna una vez en `init` (con `KBox`) y se filtra
+// (`KBox::leak`) a un `AtomicPtr`. El acceso desde `queue_rq` se serializa con
+// un spinlock propio: `queue_rq` corre en contexto donde NO se puede dormir,
+// así que ni `Mutex` ni `GFP_KERNEL` son válidos aquí.
 // ---------------------------------------------------------------------------
 
-static STORE: core::sync::OnceLock<Arc<Mutex<EstibaStore>>> = core::sync::OnceLock::new();
+static STORE: AtomicPtr<EstibaStore> = AtomicPtr::new(core::ptr::null_mut());
+static STORE_LOCK: AtomicBool = AtomicBool::new(false);
+
+/// Guard del spinlock del store (libera en `Drop`).
+struct StoreGuard;
+
+impl StoreGuard {
+    fn acquire() -> Self {
+        while STORE_LOCK
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        StoreGuard
+    }
+}
+
+impl Drop for StoreGuard {
+    fn drop(&mut self) {
+        STORE_LOCK.store(false, Ordering::Release);
+    }
+}
 
 struct EstibaStore {
     /// slot i = payload del slot (o `None` = página de ceros).
@@ -140,14 +169,12 @@ impl kernel::Module for EstibaModule {
             .logical_block_size(4096)?
             .physical_block_size(4096)?
             .rotational(false)
-            .build(format_args!("estiba"), tagset)?;
+            .build(format_args!("estiba{}", 0), tagset)?;
 
         let disk = KBox::pin_init(new_mutex!(disk, "estiba:disk"), flags::GFP_KERNEL)?;
 
-        let store = EstibaStore::new()?;
-        let store = Arc::pin_init(new_mutex!(store, "estiba:store"), flags::GFP_KERNEL)?;
-        debug_assert!(STORE.get().is_none());
-        let _ = STORE.set(store);
+        let store = KBox::new(EstibaStore::new()?, flags::GFP_KERNEL)?;
+        STORE.store(KBox::leak(store) as *mut EstibaStore, Ordering::Release);
 
         Ok(Self { _disk: disk })
     }
@@ -179,14 +206,19 @@ impl Operations for EstibaBlock {
     fn queue_rq(rq: ARef<mq::Request<Self>>, _is_last: bool) -> Result {
         // El store nunca falta (init lo crea antes de registrar el disco); si
         // un request llegara antes, lo completamos vacío en vez de colgarlo.
-        let Some(store) = STORE.get() else {
+        let ptr = STORE.load(Ordering::Acquire);
+        if ptr.is_null() {
             let _ = mq::Request::end_ok(rq);
             return Ok(());
-        };
-        let mut st = store.lock();
+        }
+        // Serializa el acceso al store (queue_rq no puede dormir).
+        let guard = StoreGuard::acquire();
+        // SAFETY: `ptr` apunta al `EstibaStore` filtrado en `init`, vivo
+        // durante toda la vida del módulo; el spinlock garantiza acceso
+        // exclusivo y el `guard` lo libera al final de la función.
+        let st = unsafe { &mut *ptr };
 
         let mut ioerr = false;
-        let mut is_read = false;
 
         // SAFETY (bloque entero): `rq.raw()` devuelve un puntero válido a un
         // `struct request` cuya cadena de bios y páginas están vivas mientras
@@ -201,13 +233,12 @@ impl Operations for EstibaBlock {
             if op == REQ_OP_FLUSH {
                 // Sin datos: no-op con éxito (v1).
             } else if op == REQ_OP_READ || op == REQ_OP_WRITE {
-                is_read = op == REQ_OP_READ;
-                let mut cur = (*rq_raw).__sector;
+                let is_read = op == REQ_OP_READ;
                 let mut bio = (*rq_raw).bio;
 
                 while !bio.is_null() && !ioerr {
                     // Acto de `bio_for_each_segment` (paso único de bios).
-                    let bi_opf = (*(*bio)).bi_opf & REQ_OP_MASK;
+                    let bi_opf = (*bio).bi_opf & REQ_OP_MASK;
                     if bi_opf != op {
                         ioerr = true;
                         break;
@@ -215,31 +246,43 @@ impl Operations for EstibaBlock {
 
                     // --- iterador de segmentos (bvec_iter +
                     // bvec_iter_advance_single) ---
-                    let mut it = (*(*bio)).bi_iter;
+                    let mut it = (*bio).bi_iter;
                     while it.bi_size != 0 && !ioerr {
                         // SAFETY: bi_io_vec tiene bi_vcnt entradas (o más) y
                         // bi_idx < bi_vcnt lo mantiene el iterador.
-                        let bv = &*(*(*bio)).bi_io_vec.add(it.bi_idx as usize);
+                        let bv = &*(*bio).bi_io_vec.add(it.bi_idx as usize);
                         let done = it.bi_bvec_done as usize;
                         let bv_len = bv.bv_len as usize;
+                        // Off en bytes dentro del bvec. Un `bio_vec` puede
+                        // cubrir VARIAS páginas (folios grandes): la página a
+                        // mapear es la `off/PAGE_SIZE`-ésima desde `bv_page`,
+                        // no siempre `bv_page`.
+                        let off = bv.bv_offset as usize + done;
                         let mut len = it.bi_size as usize;
                         len = core::cmp::min(len, bv_len - done);
-                        len = core::cmp::min(len, SIZE_4K - (bv.bv_offset as usize + done) % SIZE_4K);
+                        len = core::cmp::min(len, SIZE_4K - off % SIZE_4K);
 
                         // v1: solo páginas completas alineadas (swap/dd bs=4K).
-                        if len != SIZE_4K || (bv.bv_offset as usize + done) % SIZE_4K != 0 {
+                        if len != SIZE_4K || off % SIZE_4K != 0 {
                             ioerr = true;
                             break;
                         }
-                        let slot = (cur >> SLOT_SHIFT) as usize;
+                        // El slot se deriva del sector del PROPIO `bvec_iter`
+                        // (no de `rq->__sector`): los bios de lectura pueden
+                        // empezar con `bi_idx != 0` (bios partidos), y solo
+                        // `bi_iter.bi_sector` refleja el sector real del
+                        // segmento actual. Se avanza junto con el iterador, como
+                        // `bvec_iter_advance_single`.
+                        let sec: u64 = it.bi_sector;
+                        let slot = (sec >> SLOT_SHIFT) as usize;
                         if slot >= SLOTS {
                             ioerr = true;
                             break;
                         }
 
-                        // SAFETY: bio segmento → página valida; kmap_local_page
-                        // (helper del bindings) la mapea 1:1 en este CPU.
-                        let va = bindings::kmap_local_page(bv.bv_page);
+                        // SAFETY: `bv_page + off/4096` pertenece al segmento;
+                        // kmap_local_page la mapea 1:1 en este CPU.
+                        let va = bindings::kmap_local_page(bv.bv_page.add(off >> 12));
                         if va.is_null() {
                             ioerr = true;
                             break;
@@ -278,10 +321,11 @@ impl Operations for EstibaBlock {
                                         STATS.compressed.fetch_add(1, Ordering::Relaxed);
                                     }
                                     // Sin `?`: queue_rq debe completar SIEMPRE
-                                    // el request antes de volver.
+                                    // el request antes de volver. GFP_ATOMIC:
+                                    // queue_rq no puede dormir.
                                     let mut newv: KVec<u8> = KVec::new();
                                     if newv
-                                        .extend_from_slice(&st.bcomp[..n], flags::GFP_KERNEL)
+                                        .extend_from_slice(&st.bcomp[..n], flags::GFP_ATOMIC)
                                         .is_err()
                                     {
                                         ioerr = true;
@@ -308,13 +352,13 @@ impl Operations for EstibaBlock {
                             done_after = 0;
                             it.bi_idx += 1;
                         }
-                        it.bi_bvec_done = done_after;
+                        it.bi_bvec_done = done_after as u32;
                         it.bi_size -= len as u32;
-                        cur += 8; // 4096 / 512
+                        it.bi_sector += (len as u64) >> 9; // 4096/512
                     }
 
                     // SAFETY: bi_next, cadena viva del request.
-                    bio = (*(*bio)).bi_next;
+                    bio = (*bio).bi_next;
                 }
             } else {
                 // Operaciones no soportadas (DISCARD, WRITE_ZEROES, ...).
@@ -322,13 +366,17 @@ impl Operations for EstibaBlock {
             }
         }
 
+        // Libera el spinlock ANTES de completar (la completión puede
+        // reencolar y no debe re-entrar con el lock tomado).
+        drop(guard);
+
         if ioerr {
             STATS.errors.fetch_add(1, Ordering::Relaxed);
             // SAFETY: `rq.raw()` sigue apuntando a un request válido con el
             // ARef vivo; bloquear la completión Y soltar el ARef (refcount) es
             // el cierre correcto (NUNCA llamar después a end_ok: doble
             // completión → UAF).
-            let rptr = rq.raw();
+            let rptr = unsafe { rq.raw() };
             // SAFETY: íd.; el request se completa con error y el bloque dueño
             // le hace el último put vía el slot retirado del tagset.
             unsafe { bindings::blk_mq_end_request(rptr, BLK_STS_IOERR as bindings::blk_status_t) };

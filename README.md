@@ -107,5 +107,6 @@ docs/SPEC-estiba.md  # especificación técnica detallada + registro de cambios
 - **Módulo/kernel** (`module/`, `infra/`): **GPL-2.0** — ver `LICENSE-GPL`.
 - **Codec y userspace** (`codec/`, `bench/`): **MIT** — ver `LICENSE-MIT`.
 
-Contribuciones bienvenidas: issues, tests, relectura de la SPEC, o ayuda con
-el driver.
+Contribuciones bienvenidas: mira [`CONTRIBUTING.md`](CONTRIBUTING.md) — hay
+ideas concretas (asignador por clases, writeback, aging) para quien quiera
+mejorarlo. Licencia dual: **GPL-2.0** (módulo) + **MIT** (códec/CLI).

@@ -1,0 +1,37 @@
+# tRAM — sandbox de Fase 0
+#
+# Contenedor rootless que contiene TODO el toolchain para reconstruir el
+# kernel custom con CONFIG_RUST=y y probarlo en una VM QEMU/KVM (virtme-ng)
+# SIN tocar /boot, /lib/modules ni el GRUB del host.
+#
+# Uso (desde infra/sandbox): ./run.sh [imagen|build|test|todo]
+FROM debian:13-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Capa 1: rustup PRIMERO para que cambios en la lista de paquetes apt
+# no invaliden la caché de la toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Mismo toolchain que el host (1.98.0) + rust-src (requisito del kernel).
+# El ABI de Rust entre kernel y módulo exige versiones idénticas.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain 1.98.0 --profile minimal \
+        -c rust-src -c rustfmt \
+    && rm -rf /root/.rustup/downloads /root/.rustup/tmp
+ENV PATH=/root/.cargo/bin:$PATH
+
+# Capa 2: toolchain de build del kernel + QEMU/KVM + virtme-ng.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential bc bison flex \
+        libssl-dev libelf-dev dwarves \
+        kmod file python3 cpio rsync \
+        zstd busybox-static \
+        qemu-system-x86 qemu-utils \
+        virtme-ng \
+        bindgen libclang-19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tree

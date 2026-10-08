@@ -1,0 +1,13 @@
+[package]
+name = "tram-codec"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98"
+description = "Codec de compresion ternaria tRAM (LZ + codigo ternario por posicion)"
+license = "MIT"
+
+[features]
+default = []
+alloc = []
+
+[dependencies]

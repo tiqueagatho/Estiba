@@ -12,3 +12,7 @@ dependencies = [
 [[package]]
 name = "estiba-codec"
 version = "0.1.0"
+
+[[package]]
+name = "estiba-ctl"
+version = "0.1.0"

@@ -40,6 +40,7 @@ superar a zstd), sino *cómo* está hecho:
 | Determinismo | Dos máquinas comprimiendo lo mismo producen **exactamente los mismos bytes**. |
 | Honestidad a prueba de datos | Cada página comprimida lleva su **checksum (CRC)**: si algo se corrompe, se detecta al leer. Si comprimir no merece la pena, la página se guarda tal cual. |
 | Sin gasto extra de RAM | El camino caliente (comprimir/descomprimir) **no reserva memoria nueva**: usa búferes que el dueño del dispositivo le presta. |
+| Dedup | Detecta páginas idénticas (y páginas de un solo byte) y guarda **una sola copia** compartida. |
 | Verificación bit-exacta | Un "harness de paridad" compara el codec compilado para usuarios con el que corre dentro del kernel: **byte a byte**. |
 
 ## ⚠️ Estado honesto
@@ -76,6 +77,9 @@ Detalles técnicos completos en [`docs/SPEC-estiba.md`](docs/SPEC-estiba.md).
 # 1) Pruebas del codec (17 tests, incluye el caso de las 256 frecuencias)
 cd codec && cargo test --features alloc
 
+# 1b) Pruebas de estiba-ctl (parser de stats/swap)
+cargo test -p estiba-ctl
+
 # 2) Harness de paridad bit-exacta: el codec "de usuarios" vs el que irá
 #    dentro del kernel
 cd module/estiba && make parity          # genera la copia vendored y compara bitstreams
@@ -93,6 +97,7 @@ module/estiba/       # estiba.ko: módulo de bloque del kernel (Rust OOT)
   ├── parity/        # harness de paridad bit-exacta codec ⇔ kernel
   └── estiba.rs      # el driver (Fase 3, en desarrollo)
 bench/               # estiba-bench: benchmark reproducible + gate (ratio/throughput)
+ctl/                 # estiba-ctl: CLI de operación (tamaño, stats, swap)
 infra/sandbox/       # sandbox QEMU/KVM: kernel custom + canarios (Fase 0)
 docs/SPEC-estiba.md  # especificación técnica detallada + registro de cambios
 ```

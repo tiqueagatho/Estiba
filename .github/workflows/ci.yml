@@ -37,5 +37,8 @@ jobs:
       - name: Tests del códec (17)
         run: cargo test -p estiba-codec --features alloc --locked
 
+      - name: Tests de estiba-ctl
+        run: cargo test -p estiba-ctl --locked
+
       - name: Paridad bit-exacta (codec ⇔ port del kernel)
         run: make -C module/estiba parity

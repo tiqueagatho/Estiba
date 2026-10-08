@@ -210,6 +210,8 @@ bitstream comprimido byte a byte, roundtrip de cada motor y **cross-decoding**
 - El slot se deriva de `bvec_iter.bi_sector` (no de `rq->__sector`) y la página
   a mapear es `bv_page + off/PAGE_SIZE`: un `bio_vec` puede cubrir **folios
   grandes** (varias páginas), no siempre una.
+- **Dedup (Fase 4)**: páginas uniformes por fast-path y payload comprimido
+  compartido (tabla de internado con refcount); ver §8.
 - Se valida en VM: insmod → `dd`/`cmp` (ceros y aleatorio 4 MiB) + `swapon`.
 - **Limitaciones v1**: solo segmentos 4 KiB alineados (swap y `dd bs=4K`
   cumplen); sin sysfs propio (el crate kernel 6.12 no expone kobject/sysfs):
@@ -244,7 +246,7 @@ bitstream comprimido byte a byte, roundtrip de cada motor y **cross-decoding**
 | 1 | Códec (LZ + entropía, CRC, RAW) + formato | ✅ |
 | 2 | Verificación (parity bit-exacta + fuzz) + bench + gate v2 | ✅ |
 | 3 | `estiba.ko` validado en VM (roundtrip + swapon) | ✅ |
-| 4 | **Problemas de sistema** (donde hay margen de aporte real): páginas idénticas/cero, asignador de objetos de tamaño variable (≈`zsmalloc`), writeback, dedup, aging hot/cold | ⬜ |
+| 4 | **Problemas de sistema**: páginas idénticas/cero ✅, dedup por contenido ✅; asignador por clases (≈`zsmalloc`), writeback y aging ⬜ | 🟡 |
 | 5 | `estiba-ctl`, CI, distribución | ⬜ |
 
 **No se instala en el host local** hasta que la VM pase todos los marcadores.
@@ -253,6 +255,20 @@ bitstream comprimido byte a byte, roundtrip de cada motor y **cross-decoding**
 
 ## 8. Registro de cambios
 
+- **2026-10-08 — Fase 4 (parcial): dedup por contenido + páginas uniformes**.
+  El store pasa de `Option<KVec<u8>>` a `Slot { Vacio, Uniforme(u8),
+  Interno(idx), Unico(KVec) }`:
+  - **Páginas uniformes** (todos los bytes iguales, incl. ceros): 1 B + relleno,
+    sin llamar al códec (fast-path).
+  - **Dedup por contenido**: tabla de internado (`INTERN_LEN = 8192`, hash
+    abierto con tumbas) que comparte el **payload comprimido** entre páginas
+    idénticas con **refcount**; al liberar un slot se decrementa y la entrada
+    se marca tumba a 0. FNV-1a de 64 bits + comparación exacta (sin falsos
+    positivos). Si la tabla se llena, cae a payload propio (`Unico`).
+  - **Stats** `uniforme`/`dedup` en el unload. Medido en VM (4 MiB): escritura
+    de una página repetida 1024× → `dedup=1023`, `errors=0`; ceros → `uniforme=1024`.
+  - **Pendiente de Fase 4** (documentado, no implementado): asignador por
+    clases de tamaño (≈`zsmalloc`) y writeback a disco / aging hot-cold.
 - **2026-10-08 — Fase 3: `estiba.ko` PASS en VM**. Primer módulo de bloque
   comprimido que arranca, hace `insmod`, roundtrip `dd`/`cmp` de 4 MiB (ceros y
   aleatorio) y `swapon`/`swapoff` reales, todo dentro de un **initramfs busybox

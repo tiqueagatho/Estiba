@@ -68,6 +68,19 @@ echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
 dd if=/dev/estiba0 of=/tmp/ro bs=4096 count=1024 2>/dev/null \
     || { rmmod estiba 2>/dev/null; fail "ESTIBA-KO-FAIL read-rand"; }
 cmp /tmp/r /tmp/ro || { rmmod estiba 2>/dev/null; fail "ESTIBA-KO-FAIL cmp-rand"; }
+
+# roundtrip 3: dedup (misma página repetida 1024 veces)
+dd if=/dev/urandom of=/tmp/one bs=4096 count=1 2>/dev/null
+: > /tmp/rep
+i=0
+while [ "$i" -lt 1024 ]; do cat /tmp/one >> /tmp/rep; i=$((i + 1)); done
+dd if=/tmp/rep of=/dev/estiba0 bs=4096 count=1024 conv=fsync 2>/dev/null \
+    || { rmmod estiba 2>/dev/null; fail "ESTIBA-KO-FAIL write-dedup"; }
+sync
+echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+dd if=/dev/estiba0 of=/tmp/rep2 bs=4096 count=1024 2>/dev/null \
+    || { rmmod estiba 2>/dev/null; fail "ESTIBA-KO-FAIL read-dedup"; }
+cmp /tmp/rep /tmp/rep2 || { rmmod estiba 2>/dev/null; fail "ESTIBA-KO-FAIL cmp-dedup"; }
 echo "ESTIBA-KO-OK"
 
 echo "== swapon /dev/estiba0 =="

@@ -92,11 +92,100 @@ impl Drop for StoreGuard {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Estructuras del store: dedup por contenido (intern) + slots.
+// ---------------------------------------------------------------------------
+
+/// Tabla de dedup (potencia de 2, direccionamiento abierto).
+const INTERN_BITS: u32 = 13;
+const INTERN_LEN: usize = 1 << INTERN_BITS;
+const INTERN_MASK: usize = INTERN_LEN - 1;
+/// `hash == HASH_LIBRE` -> vacío; `HASH_TUMBA` -> borrado.
+const HASH_LIBRE: u64 = 0;
+const HASH_TUMBA: u64 = u64::MAX;
+
+/// Entrada de dedup: un payload comprimido único y su refcount.
+struct Interno {
+    hash: u64,
+    refs: u32,
+    payload: KVec<u8>,
+}
+
+/// Contenido de una página lógica de 4 KiB.
+enum Slot {
+    /// Nunca escrita: se lee como ceros.
+    Vacio,
+    /// Página de un único byte repetido (incluye ceros): 1 B + relleno.
+    Uniforme(u8),
+    /// Payload compartido con otra página (índice en la tabla de intern).
+    Interno(usize),
+    /// Payload propio (dedup no disponible: tabla llena).
+    Unico(KVec<u8>),
+}
+
+/// FNV-1a de 64 bits (nunca devuelve un centinela reservado).
+fn fnv1a(payload: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in payload {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    if h == HASH_LIBRE || h == HASH_TUMBA {
+        h = 1;
+    }
+    h
+}
+
+/// Busca un payload idéntico ya internado (mismo hash y mismos bytes).
+fn intern_buscar(intern: &KVec<Interno>, hash: u64, payload: &[u8]) -> Option<usize> {
+    let mut i = (hash as usize) & INTERN_MASK;
+    for _ in 0..INTERN_LEN {
+        let e = &intern[i];
+        if e.hash == HASH_LIBRE {
+            return None;
+        }
+        if e.hash == hash && e.payload.as_slice() == payload {
+            return Some(i);
+        }
+        i = (i + 1) & INTERN_MASK;
+    }
+    None
+}
+
+/// Inserta un payload nuevo (1ª referencia). Devuelve su índice o `None` si
+/// la tabla está llena (ni hueco libre ni tumba).
+fn intern_insertar(intern: &mut KVec<Interno>, hash: u64, payload: &[u8]) -> Option<usize> {
+    let mut i = (hash as usize) & INTERN_MASK;
+    let mut tumba: Option<usize> = None;
+    for _ in 0..INTERN_LEN {
+        let h = intern[i].hash;
+        if h == HASH_LIBRE {
+            let idx = tumba.unwrap_or(i);
+            let mut p = KVec::new();
+            p.extend_from_slice(payload, flags::GFP_ATOMIC).ok()?;
+            intern[idx] = Interno { hash, refs: 1, payload: p };
+            return Some(idx);
+        }
+        if h == HASH_TUMBA && tumba.is_none() {
+            tumba = Some(i);
+        }
+        i = (i + 1) & INTERN_MASK;
+    }
+    if let Some(idx) = tumba {
+        let mut p = KVec::new();
+        p.extend_from_slice(payload, flags::GFP_ATOMIC).ok()?;
+        intern[idx] = Interno { hash, refs: 1, payload: p };
+        return Some(idx);
+    }
+    None
+}
+
 struct EstibaStore {
-    /// slot i = payload del slot (o `None` = página de ceros).
-    slots: KVec<Option<KVec<u8>>>,
-    /// búfer destino de `compress_into` (separado de `scratch`: el codec
-    /// exige dst≠scratch).
+    /// Una entrada por página lógica.
+    slots: KVec<Slot>,
+    /// Tabla de dedup por contenido del payload comprimido.
+    intern: KVec<Interno>,
+    /// búfer destino de `compress_into` (separado de `scratch`).
     bcomp: KVec<u8>,
     /// búfer scratch del codec (tokens + sección de entropía).
     scratch: KVec<u8>,
@@ -109,7 +198,19 @@ impl EstibaStore {
         let mut slots =
             KVec::with_capacity(SLOTS, flags::GFP_KERNEL).map_err(|_| code::ENOMEM)?;
         for _ in 0..SLOTS {
-            slots.push(None, flags::GFP_KERNEL).map_err(|_| code::ENOMEM)?;
+            slots
+                .push(Slot::Vacio, flags::GFP_KERNEL)
+                .map_err(|_| code::ENOMEM)?;
+        }
+        let mut intern =
+            KVec::with_capacity(INTERN_LEN, flags::GFP_KERNEL).map_err(|_| code::ENOMEM)?;
+        for _ in 0..INTERN_LEN {
+            intern
+                .push(
+                    Interno { hash: HASH_LIBRE, refs: 0, payload: KVec::new() },
+                    flags::GFP_KERNEL,
+                )
+                .map_err(|_| code::ENOMEM)?;
         }
         let bcomp =
             KVec::from_elem(0u8, SCRATCH_LEN, flags::GFP_KERNEL).map_err(|_| code::ENOMEM)?;
@@ -117,7 +218,53 @@ impl EstibaStore {
             KVec::from_elem(0u8, SCRATCH_LEN, flags::GFP_KERNEL).map_err(|_| code::ENOMEM)?;
         let ht = KVec::from_elem(0u32, codec::HASH_TAB_LEN, flags::GFP_KERNEL)
             .map_err(|_| code::ENOMEM)?;
-        Ok(Self { slots, bcomp, scratch, ht })
+        Ok(Self { slots, intern, bcomp, scratch, ht })
+    }
+
+    /// Prepara el `Slot` de una página: páginas uniformes (fast-path) y dedup
+    /// por contenido del payload comprimido. `None` = error (→ IOERR).
+    fn preparar_slot(&mut self, src: &[u8]) -> Option<Slot> {
+        let first = src[0];
+        if src.iter().all(|&b| b == first) {
+            STATS.uniforme.fetch_add(1, Ordering::Relaxed);
+            return Some(Slot::Uniforme(first));
+        }
+        let n =
+            codec::compress_into(src, &mut self.bcomp, &mut self.scratch, &mut self.ht).ok()?;
+        if self.bcomp[3] & FLAG_RAW_BIT != 0 {
+            STATS.raw.fetch_add(1, Ordering::Relaxed);
+        } else {
+            STATS.compressed.fetch_add(1, Ordering::Relaxed);
+        }
+        let EstibaStore { intern, bcomp, .. } = self;
+        let payload = &bcomp[..n];
+        let hash = fnv1a(payload);
+        if let Some(idx) = intern_buscar(intern, hash, payload) {
+            intern[idx].refs += 1;
+            STATS.dedup.fetch_add(1, Ordering::Relaxed);
+            return Some(Slot::Interno(idx));
+        }
+        if let Some(idx) = intern_insertar(intern, hash, payload) {
+            return Some(Slot::Interno(idx));
+        }
+        // Tabla de dedup llena: payload propio, sin dedup.
+        let mut v = KVec::new();
+        v.extend_from_slice(payload, flags::GFP_ATOMIC).ok()?;
+        Some(Slot::Unico(v))
+    }
+
+    /// Libera el payload de un slot (decrementa el refcount si es compartido).
+    fn slot_liberar(&mut self, slot: Slot) {
+        if let Slot::Interno(idx) = slot {
+            let e = &mut self.intern[idx];
+            if e.refs > 0 {
+                e.refs -= 1;
+                if e.refs == 0 {
+                    e.hash = HASH_TUMBA;
+                    e.payload = KVec::new();
+                }
+            }
+        }
     }
 }
 
@@ -129,6 +276,8 @@ struct EstibaStats {
     write_bytes: AtomicU64,
     compressed: AtomicU64,
     raw: AtomicU64,
+    uniforme: AtomicU64,
+    dedup: AtomicU64,
     errors: AtomicU64,
 }
 
@@ -139,6 +288,8 @@ static STATS: EstibaStats = EstibaStats {
     write_bytes: AtomicU64::new(0),
     compressed: AtomicU64::new(0),
     raw: AtomicU64::new(0),
+    uniforme: AtomicU64::new(0),
+    dedup: AtomicU64::new(0),
     errors: AtomicU64::new(0),
 };
 
@@ -183,13 +334,15 @@ impl kernel::Module for EstibaModule {
 impl Drop for EstibaModule {
     fn drop(&mut self) {
         pr_info!(
-            "estiba: unloaded: reads={} writes={} bytes={}+{} comp={} raw={} errors={}\n",
+            "estiba: unloaded: reads={} writes={} bytes={}+{} comp={} raw={} uniforme={} dedup={} errors={}\n",
             STATS.reads.load(Ordering::Relaxed),
             STATS.writes.load(Ordering::Relaxed),
             STATS.read_bytes.load(Ordering::Relaxed),
             STATS.write_bytes.load(Ordering::Relaxed),
             STATS.compressed.load(Ordering::Relaxed),
             STATS.raw.load(Ordering::Relaxed),
+            STATS.uniforme.load(Ordering::Relaxed),
+            STATS.dedup.load(Ordering::Relaxed),
             STATS.errors.load(Ordering::Relaxed),
         );
     }
@@ -289,20 +442,31 @@ impl Operations for EstibaBlock {
                         }
 
                         if is_read {
-                            match st.slots[slot].as_ref() {
-                                None => {
+                            // SAFETY: íd., página completa de destino.
+                            let dst =
+                                core::slice::from_raw_parts_mut(va.cast::<u8>(), SIZE_4K);
+                            let ok = match &st.slots[slot] {
+                                Slot::Vacio => {
                                     // SAFETY: `va` es una página mapeada 1:1.
                                     core::ptr::write_bytes(va as *mut u8, 0, SIZE_4K);
+                                    true
                                 }
-                                Some(slot_data) => {
-                                    // SAFETY: íd., página completa de destino.
-                                    let dst =
-                                        core::slice::from_raw_parts_mut(va.cast::<u8>(), SIZE_4K);
-                                    match codec::decompress_into(slot_data, dst, &mut st.scratch) {
-                                        Ok(n) if n == SIZE_4K => {}
-                                        _ => ioerr = true,
-                                    }
+                                Slot::Uniforme(tag) => {
+                                    core::ptr::write_bytes(va as *mut u8, *tag, SIZE_4K);
+                                    true
                                 }
+                                Slot::Interno(idx) => {
+                                    let p = &st.intern[*idx].payload;
+                                    codec::decompress_into(p, dst, &mut st.scratch)
+                                        == Ok(SIZE_4K)
+                                }
+                                Slot::Unico(p) => {
+                                    codec::decompress_into(p, dst, &mut st.scratch)
+                                        == Ok(SIZE_4K)
+                                }
+                            };
+                            if !ok {
+                                ioerr = true;
                             }
                             STATS.read_bytes.fetch_add(SIZE_4K as u64, Ordering::Relaxed);
                             STATS.reads.fetch_add(1, Ordering::Relaxed);
@@ -310,30 +474,14 @@ impl Operations for EstibaBlock {
                             // SAFETY: `va` es la página de origen (bio), completa
                             // y alineada.
                             let src = core::slice::from_raw_parts(va.cast::<u8>(), SIZE_4K);
-                            match codec::compress_into(src, &mut st.bcomp, &mut st.scratch, &mut st.ht)
-                            {
-                                Ok(n) => {
-                                    // Raw si el codec no mejoró (flag bit0 del
-                                    // header; FLAG_RAW del codec es pub(crate)).
-                                    if st.bcomp[3] & FLAG_RAW_BIT != 0 {
-                                        STATS.raw.fetch_add(1, Ordering::Relaxed);
-                                    } else {
-                                        STATS.compressed.fetch_add(1, Ordering::Relaxed);
-                                    }
-                                    // Sin `?`: queue_rq debe completar SIEMPRE
-                                    // el request antes de volver. GFP_ATOMIC:
-                                    // queue_rq no puede dormir.
-                                    let mut newv: KVec<u8> = KVec::new();
-                                    if newv
-                                        .extend_from_slice(&st.bcomp[..n], flags::GFP_ATOMIC)
-                                        .is_err()
-                                    {
-                                        ioerr = true;
-                                    } else {
-                                        st.slots[slot] = Some(newv);
-                                    }
+                            // Sin `?`: queue_rq debe completar SIEMPRE el
+                            // request antes de volver.
+                            match st.preparar_slot(src) {
+                                Some(nuevo) => {
+                                    let old = core::mem::replace(&mut st.slots[slot], nuevo);
+                                    st.slot_liberar(old);
                                 }
-                                Err(_) => ioerr = true,
+                                None => ioerr = true,
                             }
                             STATS.write_bytes.fetch_add(SIZE_4K as u64, Ordering::Relaxed);
                             STATS.writes.fetch_add(1, Ordering::Relaxed);
